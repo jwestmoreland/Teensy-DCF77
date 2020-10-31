@@ -41,7 +41,7 @@
 #include "font_Arial.h"
 
 #include <utility/imxrt_hw.h>            // needed for setting I2S freq on the Teensy 4.x
-
+#define SERIAL_COUNTER_TIME_OUT 5000    // so serial port doesn't hang the board
 time_t getTeensy3Time()
 {
   return Teensy3Clock.get();
@@ -183,9 +183,20 @@ void loop();
 //=========================================================================
 
 void setup() {
-
+  unsigned int counter_main = 0;
   Serial.begin(115200);
 
+#if 1
+ // Serial.println();
+ // Serial.println();
+
+  // in case serial port isn't connected so we don't hang the program:
+  do {
+    counter_main++;
+
+  } while ( !Serial && ( counter_main < SERIAL_COUNTER_TIME_OUT) );
+#endif
+  
   setSyncProvider(getTeensy3Time);
 
   // Audio connections require memory.
