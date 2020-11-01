@@ -42,6 +42,9 @@
 
 #include <utility/imxrt_hw.h>            // needed for setting I2S freq on the Teensy 4.x
 #define SERIAL_COUNTER_TIME_OUT 5000    // so serial port doesn't hang the board
+// #define DEBUG_DECODE 1
+#define NO_SKIP_CHECK_FIXED 1
+#define DEBUG 1
 time_t getTeensy3Time()
 {
   return Teensy3Clock.get();
@@ -224,7 +227,9 @@ void setup() {
 
   set_sample_rate (sample_rate);
   set_freq_LO (freq_real);
-  //  decodeTelegram( 0x8b47c0501a821b80ULL );
+// #if defined(DEBUG_DECODE)  
+//   decodeTelegram( 0x8b47c0501a821b80ULL );
+// #endif
   displayDate();
   displayClock();
   displayPrecisionMessage();
@@ -457,7 +462,6 @@ int getParity(uint32_t value) {
   return par & 1;
 }
 
-
 int decodeTelegram(uint64_t telegram) {
   uint16_t minute, hour, day, weekday, month, year, v10;
   int parity;
@@ -469,31 +473,46 @@ int decodeTelegram(uint64_t telegram) {
 
   //TODO : more plausibility-checks to prevent false positives
 
+  //TODO:  WWVB Compatability - https://en.wikipedia.org/wiki/WWVB
+
+#if defined(NO_SKIP_CHECK_FIXED)
   //Check fixed - bits:
-  if ( ((telegram & 1) != 0) || ((telegram >> 20) & 1) == 0) {
+  if ( ((telegram >> 10) != 0) || ((telegram >> 11) != 0) == 0) {         // 10,11,20,21,34,35,44,54 always zero
     Serial.println("Fixed-Bit error\n");
     return 0;
   }
+#endif
 
+#if false  
   //MESZ Central European Summer Time ?
   mesz = (telegram >> 17) & 1;
-  if ( mesz != (~(telegram >> 18) & 1) ) {
+  if ( mesz != (~(telegram >> 18) & 1) ) {                // signed and unsigned warning here
     Serial.println("MESZ-Bit error\n");
     return 0;
   }
-
+#endif
+  
   //1. decode date & date-parity-bit
+#if false  
   parity = telegram >> 58 & 0x01;
   if (getParity( (telegram >> 36) & 0x3fffff) != parity) return 0;
-  year = ((telegram >> 54) & 0x0f) * 10 + ((telegram >> 50) & 0x0f);
+#endif  
+//  year = ((telegram >> 54) & 0x0f) * 10 + ((telegram >> 50) & 0x0f);
+  year = ((telegram >> 48) & 0x0f) * 10 + ((telegram >> 53) & 0x0f);
+#if defined(DEBUG)
+  Serial.print("year: "); Serial.println(year);
+//  Serial.printf("(year: %d)\r\n", year);
+#endif
   if (year < 16) return 0;
 
+#if false  
   month = ((telegram >> 45) & 0x0f);
   if (month > 9) return 0;
 
   month = ((telegram >> 49) & 0x01) * 10 + month;
   if ((month == 0) || (month > 12)) return 0;
 
+  
   weekday = ((telegram >> 42) & 0x07);
   if (weekday == 0) return 0;
 
@@ -501,25 +520,61 @@ int decodeTelegram(uint64_t telegram) {
   if (day > 9) return 0;
   day = ((telegram >> 40) & 0x03) * 10 + day;
   if ( (day == 0) || (day > 31) ) return 0;//Todo add check on 29.feb, 30/31 and more...
+#endif
 
-
+#if defined(DEBUG)
+  month = 11;
+  day = 1;
+  weekday = 1;
+#endif
+  
   //2. decode time & parity-bit
+#if false  
   parity = telegram >> 35 & 0x01;
   if  (getParity( (telegram >> 29) & 0x3f) != parity) return 0;
-  hour = (telegram >> 29 & 0x0f);
+#endif  
+//  hour = (telegram >> 29 & 0x0f);
+  hour = (telegram >> 18 & 0x0f);
+#if defined(DEBUG)
+  Serial.print("hour: "); Serial.println(hour);
+//  Serial.printf("\r\n");
+//  Serial.printf("(hour: %d)\r\n", hour);
+#endif  
   if (hour > 9) return 0;
-  v10 = (telegram >> 33 & 0x03);
+//  v10 = (telegram >> 33 & 0x03);
+  v10 = (telegram >> 13 & 0x03);
+#if defined(DEBUG)
+  Serial.print("v10: "); Serial.println(v10);
+//  Serial.printf("(v10: %d)\r\n", v10);
+#endif  
   if (v10 > 2) return 0;
   hour = v10 * 10 + hour;
+#if defined(DEBUG)
+  Serial.print("hourT: "); Serial.println(hour);
+//  Serial.printf("(hourT: %d)\r\n", hour);
+#endif    
   if (hour > 23) return 0;
 
+#if false  
   parity = telegram >> 28 & 0x01;
   if (getParity( (telegram >> 21) & 0x7f ) != parity) return 0;
-  minute = (telegram >> 21 & 0x0f);
+#endif
+//  minute = (telegram >> 21 & 0x0f);
+  minute = (telegram >> 8 & 0x0f);
+#if defined(DEBUG)  
+  Serial.print("minute: "); Serial.println(minute);
+#endif  
   if (minute > 9) return 0;
-  v10 = (telegram >> 25 & 0x07);
+//  v10 = (telegram >> 25 & 0x07);
+  v10 = (telegram >> 3 & 0x07);
+#if defined(DEBUG)  
+  Serial.print("v10m: "); Serial.println(v10);
+#endif  
   if (v10 > 5) return 0;
   minute = v10 * 10 + minute;
+#if defined(DEBUG)  
+  Serial.print("minuteT: "); Serial.println(minute);
+#endif  
   if (minute > 59) return 0;
 
 
@@ -559,9 +614,14 @@ int decode(unsigned long t) {
   unsigned long m;
 
   m = millis();
-  if ( m - tlastBit > 1600) {
+//  if ( m - tlastBit > 1600) {                 // 1.6s?
+ if ( m - tlastBit > 999 ) {  
+#if defined(DEBUG_DECODE)
     Serial.printf(" End Of Telegram. Data: 0x%llx %d Bits\n", data, sec);
+#endif   
+//    Serial.print("-"); 
     tft.fillRect(14, 54, 59 * 5, 3, ILI9341_BLACK);
+//    if (sec >= 59) {    
     if (sec == 59) {
       precision_flag = decodeTelegram(data);
       displayPrecisionMessage();
@@ -572,8 +632,12 @@ int decode(unsigned long t) {
   }
   tlastBit = m;
 
-  bit = (t > 150) ? 1 : 0;
+//  bit = (t > 150) ? 1 : 0;          // does this work for WWVB?  Have
+//  to allow for markers
+  bit = (t > 300) ? 1 : 0;
+// #if defined(DEBUG_DECODE)  
   Serial.print(bit);
+// #endif
 
   // plot horizontal bar
   tft.fillRect(14 + 5 * sec, 54, 3, 3, bit ? ILI9341_YELLOW : ILI9341_PURPLE);
@@ -581,6 +645,8 @@ int decode(unsigned long t) {
 
   sec++;
   if (sec > 59) { // just to prevent accidents with weak signals ;-)
+//    Serial.println(sec);
+    Serial.println("!");
     sec = 0;
   }
   return bit;
