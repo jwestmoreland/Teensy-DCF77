@@ -45,6 +45,7 @@
 // #define DEBUG_DECODE 1
 #define NO_SKIP_CHECK_FIXED 1
 #define DEBUG 1
+#define DEBUG_T 1
 time_t getTeensy3Time()
 {
   return Teensy3Clock.get();
@@ -614,8 +615,8 @@ int decode(unsigned long t) {
   unsigned long m;
 
   m = millis();
-//  if ( m - tlastBit > 1600) {                 // 1.6s?
- if ( m - tlastBit > 999 ) {  
+  if ( m - tlastBit > 1600) {                 // 1.6s?
+// if ( m - tlastBit > 999001 ) {  
 #if defined(DEBUG_DECODE)
     Serial.printf(" End Of Telegram. Data: 0x%llx %d Bits\n", data, sec);
 #endif   
@@ -632,11 +633,35 @@ int decode(unsigned long t) {
   }
   tlastBit = m;
 
-//  bit = (t > 150) ? 1 : 0;          // does this work for WWVB?  Have
-//  to allow for markers
-  bit = (t > 300) ? 1 : 0;
+  
+  // Official patterns:
+  //     Zero is 200ms low, 800ms high
+  //     One  is 500ms low, 500ms high
+  //     Mark is 800ms low, 200ms high
+  
+ if ( t < 220 )
+  {
+    bit = 1;
+  }
+
+  if ( t < 600 )
+  {
+    bit = 0;
+  }
+
+   if ( t < 750 )
+  {
+    bit = 'M';                         // beginning pattern - look for two in row
+  }
+
+//  bit = (t > 150) ? 1 : 0;          // does this work for WWVB?  Have to allow for markers
+///  bit = (t > 300) ? 1 : 0;
 // #if defined(DEBUG_DECODE)  
-  Serial.print(bit);
+//  Serial.print(bit);
+#if defined(DEBUG_T)  
+  Serial.print("t: "); Serial.print(t);
+#endif  
+//    Serial.print(t);
 // #endif
 
   // plot horizontal bar
