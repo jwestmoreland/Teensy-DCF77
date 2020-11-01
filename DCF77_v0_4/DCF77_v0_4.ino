@@ -639,17 +639,17 @@ int decode(unsigned long t) {
   //     One  is 500ms low, 500ms high
   //     Mark is 800ms low, 200ms high
   
- if ( t < 220 )
+ if ( t < 150 )
   {
     bit = 1;
   }
 
-  if ( t < 600 )
+  if ( t > 150 )
   {
     bit = 0;
   }
 
-   if ( t < 750 )
+   if ( t > 250 )
   {
     bit = 'M';                         // beginning pattern - look for two in row
   }
@@ -658,8 +658,9 @@ int decode(unsigned long t) {
 ///  bit = (t > 300) ? 1 : 0;
 // #if defined(DEBUG_DECODE)  
 //  Serial.print(bit);
-#if defined(DEBUG_T)  
-  Serial.print("t: "); Serial.print(t);
+#if defined(DEBUG_T)
+  Serial.print(bit);
+  Serial.print(" <-t: "); Serial.print(t);
 #endif  
 //    Serial.print(t);
 // #endif
