@@ -9,7 +9,7 @@
 
     https://github.com/DD4WH/Teensy-DCF77/wiki
 */
-#define VERSION     " v0.42b"					// updated - AJ6BC to work with WWVB (USA) - please see ReadMe.md for more detail.
+#define VERSION     " v0.42b"					// updated - AJ6BC to work (pending) with WWVB (USA) - please see ReadMe.md for more detail.
 /*
    Permission is hereby granted, free of charge, to any person obtaining a copy
    of this software and associated documentation files (the "Software"), to deal
