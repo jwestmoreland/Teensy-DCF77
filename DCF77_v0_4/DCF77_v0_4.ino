@@ -46,6 +46,8 @@
 #define NO_SKIP_CHECK_FIXED 1
 #define DEBUG 1
 #define DEBUG_T 1
+#define DEBUG_SIGNAL 1
+
 time_t getTeensy3Time()
 {
   return Teensy3Clock.get();
@@ -127,7 +129,9 @@ unsigned int sample_rate_real = 192000;
 
 unsigned int freq_LO = 7000;
 float dcf_signal = 0;
+float dcf_signal_raw;
 float dcf_threshold = 0;
+float dcf_threshold_raw = 0;
 float dcf_med = 0;
 unsigned int DCF_bin;// this is the FFT bin where the 77.5kHz signal is
 
@@ -421,13 +425,23 @@ void agc() {
   //  tft.drawFastHLine(14, 220 - dcf_med, 256, ILI9341_BLACK);
   tft.drawFastHLine(220, 220 - dcf_med, 46, ILI9341_BLACK);
   dcf_signal = (abs(myFFT.output[DCF_bin]) + abs(myFFT.output[DCF_bin + 1])) * displayscale;
-  if (dcf_signal > 175) dcf_signal  = 175;
+  
+#if defined(DEBUG_SIGNAL)
+  dcf_signal_raw = dcf_signal;
+//  Serial.print("sig: "); Serial.print(dcf_signal);
+#endif    
+///  if (dcf_signal > 175) dcf_signal  = 175;
+  if (dcf_signal > 500) dcf_signal  = 500;
   else if (dcf_med == 0) dcf_med = dcf_signal;
   dcf_med = (1 - speed_agc) * dcf_signal + speed_agc * dcf_med;
   tft.drawFastHLine(220, 220 - dcf_med, 46, ILI9341_ORANGE);
 
   tft.drawFastHLine(220, 220 - dcf_threshold, 46, ILI9341_BLACK);
   dcf_threshold = (1 - speed_thr) * dcf_signal + speed_thr * dcf_threshold;
+#if defined(DEBUG_SIGNAL)
+  dcf_threshold_raw = dcf_threshold;
+//  Serial.print("sig: "); Serial.print(dcf_signal);
+#endif      
   tft.drawFastHLine(220, 220 - dcf_threshold, 46, ILI9341_GREEN);
 
   unsigned long t = millis();
@@ -651,7 +665,9 @@ int decode(unsigned long t) {
 
    if ( t > 250 )
   {
-    bit = 'M';                         // beginning pattern - look for two in row
+        bit = 'M';                         // beginning pattern - look for two in row
+//      bit = 0x4D;
+//      bit = 0x2;                        // let 2 == M for Marker Frame
   }
 
 //  bit = (t > 150) ? 1 : 0;          // does this work for WWVB?  Have to allow for markers
@@ -659,8 +675,16 @@ int decode(unsigned long t) {
 // #if defined(DEBUG_DECODE)  
 //  Serial.print(bit);
 #if defined(DEBUG_T)
-  Serial.print(bit);
-  Serial.print(" <-t: "); Serial.print(t);
+    Serial.printf("\r\n");
+    if ( bit == 'M' ) {
+    Serial.print(" bit: "); Serial.print('M');
+    } else {
+    Serial.print(" bit: "); Serial.print(bit);  
+    }
+    Serial.print(" <-t: "); Serial.print(t);
+    Serial.print(" raw: "); Serial.print(dcf_signal_raw);
+    Serial.print(" thres: "); Serial.print(dcf_threshold_raw);
+    Serial.print(" sec: "); Serial.print(sec);   
 #endif  
 //    Serial.print(t);
 // #endif
