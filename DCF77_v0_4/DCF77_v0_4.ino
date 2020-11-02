@@ -43,11 +43,17 @@
 #include <utility/imxrt_hw.h>            // needed for setting I2S freq on the Teensy 4.x
 #define SERIAL_COUNTER_TIME_OUT 5000    // so serial port doesn't hang the board
 // #define DEBUG_DECODE 1
+#define DEBUG_TELEGRAM_DECODE 1
+#define DEBUG_DECODE_TELEGRAM 1
 #define NO_SKIP_CHECK_FIXED 1
 #define DEBUG 1
 #define DEBUG_T 1
 #define DEBUG_SIGNAL 1
-
+#define DEBUG_SIGNAL_TO 1
+#define MARKER_MASK (0x7fdff7fdff7fdfeULL)    // Markers are Zeroes - need to check
+#define MARKER_AND_UNUSED_MASK (0x7bdec73dfc7f1feULL)    // Markers and Unused are Zeroes
+#define DEBUG_SIGNAL_TO_MS 1600       // signal time-out (?)
+#define DEBUG_T_BOX 150     // min time window in ms, 190, 490, 790
 time_t getTeensy3Time()
 {
   return Teensy3Clock.get();
@@ -192,6 +198,7 @@ void loop();
 
 void setup() {
   unsigned int counter_main = 0;
+  uint64_t temp_var = 0;
   Serial.begin(115200);
 
 #if 1
@@ -232,9 +239,13 @@ void setup() {
 
   set_sample_rate (sample_rate);
   set_freq_LO (freq_real);
-// #if defined(DEBUG_DECODE)  
+#if defined(DEBUG_DECODE_TELEGRAM)  
 //   decodeTelegram( 0x8b47c0501a821b80ULL );
-// #endif
+ //  decodeTelegram( 0xb040f0358530611ULL );
+//     decodeTelegram( 0x1160f035853460bULL );
+//       temp_var = (0x8860ca1ac0f020dULL & MARKER_AND_UNUSED_MASK);
+       decodeTelegram( 0x840C218C07000CULL );
+#endif
   displayDate();
   displayClock();
   displayPrecisionMessage();
@@ -429,9 +440,16 @@ void agc() {
 #if defined(DEBUG_SIGNAL)
   dcf_signal_raw = dcf_signal;
 //  Serial.print("sig: "); Serial.print(dcf_signal);
-#endif    
-///  if (dcf_signal > 175) dcf_signal  = 175;
-  if (dcf_signal > 500) dcf_signal  = 500;
+#endif   
+#if defined(DEBUG_SIGNAL) 
+if (dcf_signal > 850) 
+{
+  dcf_signal  = 850;
+  Serial.print(".");
+}
+#else
+  if (dcf_signal > 175) dcf_signal  = 175;
+#endif  
   else if (dcf_med == 0) dcf_med = dcf_signal;
   dcf_med = (1 - speed_agc) * dcf_signal + speed_agc * dcf_med;
   tft.drawFastHLine(220, 220 - dcf_med, 46, ILI9341_ORANGE);
@@ -481,6 +499,8 @@ int decodeTelegram(uint64_t telegram) {
   uint16_t minute, hour, day, weekday, month, year, v10;
   int parity;
 
+//  uint64_t *telegram_ptr  = &telegram;
+
   //Plausibility checks and decoding telegram
   //Example-Data: 0x8b47c14f468f9ec0ULL : 2016/11/20
 
@@ -492,9 +512,20 @@ int decodeTelegram(uint64_t telegram) {
 
 #if defined(NO_SKIP_CHECK_FIXED)
   //Check fixed - bits:
-  if ( ((telegram >> 10) != 0) || ((telegram >> 11) != 0) == 0) {         // 10,11,20,21,34,35,44,54 always zero
-    Serial.println("Fixed-Bit error\n");
-    return 0;
+  if ( (((telegram >> 10)& 0x0f) != 0) || (((telegram >> 11)& 0x0f) != 0) || (((telegram >> 20)& 0x0f) != 0) || (((telegram >> 21)& 0x0f) != 0)\
+  || (((telegram >> 34)& 0x0f) != 0) || (((telegram >> 35)& 0x0f) != 0) || (((telegram >> 44)& 0x0f) != 0) || (((telegram >> 54)& 0x0f) != 0) ) 
+   {         // 10,11,20,21,34,35,44,54 always zero
+    Serial.println("Unused-Bit error\n");
+#if defined(DEBUG_DECODE_TELEGRAM)  
+    Serial.printf(":0x%x:0x%x\r\n", ((telegram >> 10)& 0x0f), ((telegram >> 11)& 0x0f));
+    Serial.printf(":0x%x:0x%x\r\n", ((telegram >> 20)& 0x0f), ((telegram >> 21)& 0x0f));
+    Serial.printf(":0x%x:0x%x\r\n", ((telegram >> 34)& 0x0f), ((telegram >> 35)& 0x0f));
+    Serial.printf(":0x%x:0x%x\r\n", ((telegram >> 44)& 0x0f), ((telegram >> 54)& 0x0f));
+//    Serial.printf(":%x0x:%x0x\r\n", (*(telegram_ptr+10)& 0x0f) , (*(telegram_ptr+11)& 0x0f));
+#else
+   return 0;
+#endif
+  
   }
 #endif
 
@@ -513,12 +544,19 @@ int decodeTelegram(uint64_t telegram) {
   if (getParity( (telegram >> 36) & 0x3fffff) != parity) return 0;
 #endif  
 //  year = ((telegram >> 54) & 0x0f) * 10 + ((telegram >> 50) & 0x0f);
-  year = ((telegram >> 48) & 0x0f) * 10 + ((telegram >> 53) & 0x0f);
+  year = ((telegram >> 48) & 0x0f) * 10 + ((telegram >> 47) & 0x0f) * 20 + ((telegram >> 46) & 0x0f) * 40 + ((telegram >> 45) & 0x0f) * 80;  // 00-99 is range for encoded year
+  year = year + ((telegram >> 53) & 0x0f) + ((telegram >> 54) & 0x0f) * 2 + ((telegram >> 55) & 0x0f) * 4 + ((telegram >> 56) & 0x0f) * 8;
 #if defined(DEBUG)
   Serial.print("year: "); Serial.println(year);
+  if ( year > 99 )
+    Serial.println("Error - encoded year range is only 00-99.");
 //  Serial.printf("(year: %d)\r\n", year);
 #endif
+#if defined(DEBUG_DECODE_TELEGRAM)
+         ;
+#else
   if (year < 16) return 0;
+#endif
 
 #if false  
   month = ((telegram >> 45) & 0x0f);
@@ -575,10 +613,13 @@ int decodeTelegram(uint64_t telegram) {
   if (getParity( (telegram >> 21) & 0x7f ) != parity) return 0;
 #endif
 //  minute = (telegram >> 21 & 0x0f);
-  minute = (telegram >> 8 & 0x0f);
+  minute = (telegram >> 8 & 0x0f) + (telegram >> 7 & 0x0f) * 2 + (telegram >> 6 & 0x0f) * 4 + (telegram >> 5 & 0x0f) * 8 + (telegram >> 3 & 0x0f) * 10 + (telegram >> 2 & 0x0f) * 20 + (telegram >> 1 & 0x0f) * 40;  // 00-59
 #if defined(DEBUG)  
   Serial.print("minute: "); Serial.println(minute);
+  if ( minute > 59 )
+  Serial.println("Error:  minute > 59");
 #endif  
+#if false   // maybe only intervals are decoded... hence the 'incomplete' calculations...(?)
   if (minute > 9) return 0;
 //  v10 = (telegram >> 25 & 0x07);
   v10 = (telegram >> 3 & 0x07);
@@ -590,12 +631,18 @@ int decodeTelegram(uint64_t telegram) {
 #if defined(DEBUG)  
   Serial.print("minuteT: "); Serial.println(minute);
 #endif  
+#endif
   if (minute > 59) return 0;
 
 
   //All data seem to be ok.
   Serial.printf("Time set: %d.%d.20%d %d:%02d %s\n", day, month, year, hour, minute, mesz ? "MESZ" : "MEZ");
+#if defined(DEBUG_DECODE_TELEGRAM)
+      ;
+#else  
   setTime (hour, minute, 0, day, month, year);
+#endif    
+  
   Teensy3Clock.set(now());
   displayDate();
   return 1;
@@ -627,10 +674,18 @@ int decode(unsigned long t) {
   static unsigned long tlastBit = 0;
   int bit;
   unsigned long m;
+  static unsigned char last_bit = 0;
+  static unsigned char this_bit = 0;
+  static bool M_FLAG = false;        // set if we get 2 Markers in a row
 
   m = millis();
+#if defined(DEBUG_SIGNAL_TO)  
+//  if ( m - tlastBit > 2000 ) {        
+  if ( m - tlastBit > DEBUG_SIGNAL_TO_MS ) {  
+#else
   if ( m - tlastBit > 1600) {                 // 1.6s?
-// if ( m - tlastBit > 999001 ) {  
+#endif
+ 
 #if defined(DEBUG_DECODE)
     Serial.printf(" End Of Telegram. Data: 0x%llx %d Bits\n", data, sec);
 #endif   
@@ -653,36 +708,46 @@ int decode(unsigned long t) {
   //     One  is 500ms low, 500ms high
   //     Mark is 800ms low, 200ms high
   
- if ( t < 150 )
-  {
-    bit = 1;
-  }
-
-  if ( t > 150 )
+ if ( t < 250 )
   {
     bit = 0;
   }
 
-   if ( t > 250 )
+  if ( t >= 250 )
+  {
+    bit = 1;
+  }
+
+   if ( t >= 300 )
   {
         bit = 'M';                         // beginning pattern - look for two in row
+        if ( last_bit == bit )  // 2 M's
+        M_FLAG = true;          // set flag
 //      bit = 0x4D;
 //      bit = 0x2;                        // let 2 == M for Marker Frame
   }
 
-//  bit = (t > 150) ? 1 : 0;          // does this work for WWVB?  Have to allow for markers
+//  bit = (t > 150) ? 1 : 0;          // (This denontes DCF77 'low' time.)  does this work for WWVB?  Have to allow for markers
 ///  bit = (t > 300) ? 1 : 0;
 // #if defined(DEBUG_DECODE)  
 //  Serial.print(bit);
 #if defined(DEBUG_T)
     Serial.printf("\r\n");
     if ( bit == 'M' ) {
+  if (M_FLAG == true)
+    {
+//    Serial.print("*Start of minute?*-> ");
+    Serial.print("*SOM?*-> ");
+    }   
+   
     Serial.print(" bit: "); Serial.print('M');
+    
     } else {
     Serial.print(" bit: "); Serial.print(bit);  
     }
     Serial.print(" <-t: "); Serial.print(t);
     Serial.print(" raw: "); Serial.print(dcf_signal_raw);
+    Serial.print(" med: "); Serial.print(dcf_med);
     Serial.print(" thres: "); Serial.print(dcf_threshold_raw);
     Serial.print(" sec: "); Serial.print(sec);   
 #endif  
@@ -699,12 +764,16 @@ int decode(unsigned long t) {
     Serial.println("!");
     sec = 0;
   }
+  last_bit = bit;
+  M_FLAG = false;
   return bit;
 }
 
 void detectBit() {
   static float dcf_threshold_last = 1000;
   static unsigned long secStart = 0;
+
+//  dcf_threshold = 250;          // bias this right now.
 
   if ( dcf_threshold <= dcf_threshold_last)
   {
@@ -715,7 +784,9 @@ void detectBit() {
 
   else {
     unsigned long t = millis() - secStart;
-    if ((secStart > 0) && (t > 90)) {
+    if ((secStart > 0) && (t > DEBUG_T_BOX )) {  // 200, 500, 800 -> 190, 490, 790
+//    if ((secStart > 0) && (t > 90)) {     
+  
       int bit = decode(t);
       
       tft.fillRect(291, 5, 18, 18, ILI9341_BLACK);
