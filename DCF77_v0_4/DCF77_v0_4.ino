@@ -52,8 +52,13 @@
 #define DEBUG_SIGNAL_TO 1
 #define MARKER_MASK (0x7fdff7fdff7fdfeULL)    // Markers are Zeroes - need to check
 #define MARKER_AND_UNUSED_MASK (0x7bdec73dfc7f1feULL)    // Markers and Unused are Zeroes
-#define DEBUG_SIGNAL_TO_MS 1600       // signal time-out (?)
-#define DEBUG_T_BOX 150     // min time window in ms, 190, 490, 790
+#define DEBUG_SIGNAL_TO_MS 850       // signal time-out (?)         // 900
+#define DEBUG_T_BOX 190    // min time window in ms, 190, 490, 790  // 80
+#define DEBUG_DETECT_TO 10 // time out for calling detect bit routine in loop()
+// #define DEBUG_PROCESSOR_CHECK 1  
+// #define DEBUG_LOOP_CHECK 1
+
+
 time_t getTeensy3Time()
 {
   return Teensy3Clock.get();
@@ -113,6 +118,9 @@ AudioConnection          patchCord6(biquad2, 0, i2s_out, 1);
 AudioConnection          patchCord7(biquad2, 0, i2s_out, 0);
 AudioControlSGTL5000     sgtl5000_1;
 
+
+// static unsigned long ltime = millis(); //Timer for loop
+
 // Metro 1 second
 Metro second_timer = Metro(1000);
 
@@ -131,7 +139,7 @@ unsigned int freq_real = DCF77_FREQ - 600;
 //unsigned int sample_rate_real = 176400;
 const unsigned int sample_rate = SAMPLE_RATE_192K;
 unsigned int sample_rate_real = 192000;
-
+unsigned long ltime = millis(); // Timer for loop
 
 unsigned int freq_LO = 7000;
 float dcf_signal = 0;
@@ -244,24 +252,45 @@ void setup() {
  //  decodeTelegram( 0xb040f0358530611ULL );
 //     decodeTelegram( 0x1160f035853460bULL );
 //       temp_var = (0x8860ca1ac0f020dULL & MARKER_AND_UNUSED_MASK);
-       decodeTelegram( 0x840C218C07000CULL );
+    decodeTelegram( 0x840C218C07000CULL );
 #endif
   displayDate();
   displayClock();
   displayPrecisionMessage();
+
+  
+  
 } // END SETUP
 
 
 void loop() {
 
+#if defined(DEBUG_LOOP_TIME)	
+	static unsigned long t = 1000;
+	static unsigned long ttime = 1000;
+#endif
+	
   if (myFFT.available())
   {
-    agc();
-    detectBit();
+	  agc();
+
+	  if ( millis() - ltime >= DEBUG_DETECT_TO )		// call bit detection periodically
+	  {
+		  detectBit();
+		  ltime = millis();
+	  }
+	  
     spectrum();
     displayClock();
+#if defined(DEBUG_LOOP_TIME)	   
+    ttime = millis();
+    Serial.printf("%d\r\n", (ttime - t));
+    t = millis();
+#endif    
   }
-  //  check_processor();
+#if defined(DEBUG_PROCESSOR_CHECK)  
+      check_processor();
+#endif
 }
 
 void set_mic_gain(int8_t gain) {
@@ -677,6 +706,8 @@ int decode(unsigned long t) {
   static unsigned char last_bit = 0;
   static unsigned char this_bit = 0;
   static bool M_FLAG = false;        // set if we get 2 Markers in a row
+  static short missed_bit = 0;
+  static bool got_bit_flag = false;
 
   m = millis();
 #if defined(DEBUG_SIGNAL_TO)  
@@ -702,29 +733,45 @@ int decode(unsigned long t) {
   }
   tlastBit = m;
 
+  missed_bit = 1;
   
   // Official patterns:
   //     Zero is 200ms low, 800ms high
   //     One  is 500ms low, 500ms high
   //     Mark is 800ms low, 200ms high
+ 
+ if ( t <= 200 && t >= 100 )
+  {
+	  bit = 0;
+	  got_bit_flag = true;
+	  missed_bit = 0;
+  } else {
+    missed_bit = 1;
+  } 
+
+  if ( t >= 350 && t < 510 )
+  {
+	  bit = 1;
+	  got_bit_flag = true;
+	  if (missed_bit) 
+		  missed_bit = 0;
+  } else {
+	          if ( !got_bit_flag )
+		  missed_bit = 1;	  
+  }
   
- if ( t < 250 )
-  {
-    bit = 0;
-  }
-
-  if ( t >= 250 )
-  {
-    bit = 1;
-  }
-
-   if ( t >= 300 )
+   if ( t >= 510 )
   {
         bit = 'M';                         // beginning pattern - look for two in row
         if ( last_bit == bit )  // 2 M's
-        M_FLAG = true;          // set flag
+		M_FLAG = true;          // set flag
+	
+		 missed_bit = 0;
 //      bit = 0x4D;
 //      bit = 0x2;                        // let 2 == M for Marker Frame
+  } else {
+	  if (!got_bit_flag )
+	   missed_bit = 1;
   }
 
 //  bit = (t > 150) ? 1 : 0;          // (This denontes DCF77 'low' time.)  does this work for WWVB?  Have to allow for markers
@@ -749,7 +796,13 @@ int decode(unsigned long t) {
     Serial.print(" raw: "); Serial.print(dcf_signal_raw);
     Serial.print(" med: "); Serial.print(dcf_med);
     Serial.print(" thres: "); Serial.print(dcf_threshold_raw);
-    Serial.print(" sec: "); Serial.print(sec);   
+    Serial.print(" sec: "); Serial.print(sec);
+    if ( missed_bit )
+    {
+	    Serial.print(" missed bit: "); Serial.print(missed_bit);
+	    missed_bit = 0;
+	    got_bit_flag = false;
+    }
 #endif  
 //    Serial.print(t);
 // #endif
@@ -886,10 +939,9 @@ CCM_CS2CDR = (CCM_CS2CDR & ~(CCM_CS2CDR_SAI2_CLK_PRED_MASK | CCM_CS2CDR_SAI2_CLK
 //END//Added afterwards to make the SAI2 function at the desired frequency as well.
 }
 
-
-
 void check_processor() {
-  if (second_timer.check() == 1) {
+    if (second_timer.check() == 1) {
+    Serial.println("");
     Serial.print("Proc = ");
     Serial.print(AudioProcessorUsage());
     Serial.print(" (");
