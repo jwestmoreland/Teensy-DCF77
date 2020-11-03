@@ -1,4 +1,4 @@
-/***********************************************************************
+/**********************************************************************
    Copyright (c) 2016, Frank Bösing, f.boesing@gmx.de & Frank DD4WH, dd4wh.swl@gmail.com
 
     Teensy DCF77 Receiver & Real Time Clock
@@ -52,11 +52,12 @@
 #define DEBUG_SIGNAL_TO 1
 #define MARKER_MASK (0x7fdff7fdff7fdfeULL)    // Markers are Zeroes - need to check
 #define MARKER_AND_UNUSED_MASK (0x7bdec73dfc7f1feULL)    // Markers and Unused are Zeroes
-#define DEBUG_SIGNAL_TO_MS 850       // signal time-out (?)         // 900
+#define DEBUG_SIGNAL_TO_MS 900       // signal time-out (?)         // 900
 #define DEBUG_T_BOX 190    // min time window in ms, 190, 490, 790  // 80
 #define DEBUG_DETECT_TO 10 // time out for calling detect bit routine in loop()
 // #define DEBUG_PROCESSOR_CHECK 1  
 // #define DEBUG_LOOP_CHECK 1
+#define DEBUG_SIGNAL_DATA_SAMPLE_DUMP 1
 
 
 time_t getTeensy3Time()
@@ -148,7 +149,10 @@ float dcf_threshold = 0;
 float dcf_threshold_raw = 0;
 float dcf_med = 0;
 unsigned int DCF_bin;// this is the FFT bin where the 77.5kHz signal is
-
+#ifdef DEBUG_SIGNAL_DATA_SAMPLE_DUMP
+float dcf_signal_array[100];		// take 100 samples to examine
+bool signal_ready_FLAG = false;
+#endif
 bool timeflag = 0;
 const int8_t pos_x_date = 14;
 const int8_t pos_y_date = 68;
@@ -243,8 +247,8 @@ void setup() {
   tft.setFont(Arial_12);
   tft.print("Teensy DCF77 Receiver "); tft.print(VERSION);
   tft.setTextColor(ILI9341_WHITE);
-  //  display_settings();
-
+  display_settings();
+  delay(2000);
   set_sample_rate (sample_rate);
   set_freq_LO (freq_real);
 #if defined(DEBUG_DECODE_TELEGRAM)  
@@ -462,18 +466,35 @@ void agc() {
 
   const float speed_thr = 0.995;
 
+  static unsigned short i = 0;
+  
   //  tft.drawFastHLine(14, 220 - dcf_med, 256, ILI9341_BLACK);
   tft.drawFastHLine(220, 220 - dcf_med, 46, ILI9341_BLACK);
   dcf_signal = (abs(myFFT.output[DCF_bin]) + abs(myFFT.output[DCF_bin + 1])) * displayscale;
-  
+#ifdef DEBUG_SIGNAL_DATA_SAMPLE_DUMP  
+  if ( signal_ready_FLAG == false ) {            // an array of samples to dump
+	  if ( i < 100 ) {
+		  if ( dcf_signal > 800 )
+		  dcf_signal_array[i++] = dcf_signal;
+//		  Serial.print(".");
+	  } else {
+		  if ( i >= 100)
+		  {
+			  signal_ready_FLAG = true;
+			  i = 0;
+			  Serial.print("****");
+		  }
+	  }
+  }
+#endif
 #if defined(DEBUG_SIGNAL)
   dcf_signal_raw = dcf_signal;
 //  Serial.print("sig: "); Serial.print(dcf_signal);
 #endif   
 #if defined(DEBUG_SIGNAL) 
-if (dcf_signal > 850) 
+if (dcf_signal > 950) 
 {
-  dcf_signal  = 850;
+  dcf_signal  = 950;
   Serial.print(".");
 }
 #else
@@ -507,7 +528,8 @@ if (dcf_signal > 850)
       set_mic_gain(mic_gain);
       Serial.printf("(Gain: %d)", mic_gain);
     }
-    if ((dcf_med < 100) && (mic_gain < 58)) {
+//    if ((dcf_med < 100) && (mic_gain < 58)) {
+      if ((dcf_med < 100) && (mic_gain < 63)) {
       mic_gain++;
       set_mic_gain(mic_gain);
       Serial.printf("(Gain: %d)", mic_gain);
@@ -740,7 +762,7 @@ int decode(unsigned long t) {
   //     One  is 500ms low, 500ms high
   //     Mark is 800ms low, 200ms high
  
- if ( t <= 200 && t >= 100 )
+ if ( t <= 210 && t >= 90 )
   {
 	  bit = 0;
 	  got_bit_flag = true;
@@ -749,7 +771,7 @@ int decode(unsigned long t) {
     missed_bit = 1;
   } 
 
-  if ( t >= 350 && t < 510 )
+  if ( t >= 490 && t < 790 )
   {
 	  bit = 1;
 	  got_bit_flag = true;
@@ -760,7 +782,7 @@ int decode(unsigned long t) {
 		  missed_bit = 1;	  
   }
   
-   if ( t >= 510 )
+   if ( t >= 790 )
   {
         bit = 'M';                         // beginning pattern - look for two in row
         if ( last_bit == bit )  // 2 M's
@@ -803,6 +825,23 @@ int decode(unsigned long t) {
 	    missed_bit = 0;
 	    got_bit_flag = false;
     }
+#ifdef DEBUG_SIGNAL_DATA_SAMPLE_DUMP
+    unsigned short i = 0;
+///    Serial.print("+");
+    if ( signal_ready_FLAG == true )
+    {
+//	    Serial.print("-");
+	    Serial.printf("\r\n");
+	    while ( i < 100 )
+	    {
+		    Serial.printf("\t data :");
+		    Serial.print(dcf_signal_array[i++]);
+	    }
+
+//	    Serial.print("+");	    
+	    signal_ready_FLAG = false;
+    }    
+#endif    
 #endif  
 //    Serial.print(t);
 // #endif
